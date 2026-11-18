@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Verify version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".Substring(1)
+          $source = Get-Content MainForm.cs -Raw
+          if ($source -notmatch ('APP_VERSION\s*=\s*"' + [regex]::Escape($tag) + '"')) {
+              throw "APP_VERSION 与 tag v$tag 不一致"
+          }
+
+      - name: Build
+        run: dotnet publish AutoDeleteImage.csproj -c Release -o publish
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem publish -File |
+              Where-Object { $_.Name -notlike "*.pdb" -and $_.Name -ne "config.ini" } |
+              ForEach-Object { $_.FullName }
+          Compress-Archive -Path $files -DestinationPath "AutoDeleteImage-win.zip" -Force
+          $version = "${{ github.ref_name }}".Substring(1)
+          Set-Content version.txt $version -Encoding ascii
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            AutoDeleteImage-win.zip
+            version.txt
+          generate_release_notes: true
+          fail_on_unmatched_files: true

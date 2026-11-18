@@ -15,6 +15,7 @@
 - **递归清理子文件夹**：文件删空后的子文件夹会一并删除，任务根目录始终保留。
 - **详细运行日志**：按天保存到 `Log\yyyy-MM-dd.log`，记录任务开始、每个删除的文件、删除的空文件夹、跳过的子文件夹及汇总结果。
 - **后台运行**：关闭窗口最小化到托盘，支持开机自启。
+- **自动更新**：启动后每天检查一次 GitHub 最新 Release，发现新版本可一键下载并重启安装，保留任务配置和日志。
 - **状态栏提示**：未运行白底、运行中绿底、失败红底。
 
 ## 递归清理安全规则
@@ -51,6 +52,49 @@ jpg jpeg jpe jfif png bmp gif tif tiff webp heic heif csv txt
 [2026-11-18 11:04:53] [TestTask] 手动执行完成，删除 1 个文件，清理 1 个空文件夹
 ```
 
+## 自动更新
+
+- 程序启动后每天最多检查一次最新版本，也可以从托盘菜单手动点“检查更新”。
+- 发现新版本后提示用户，确认后下载 `AutoDeleteImage-win.zip`，退出后由临时更新脚本替换 `AutoDeleteImage.exe`、`AutoDeleteImage.exe.config` 和 `Delete_image.ico`。
+- 更新不会覆盖 `config.ini` 和 `Log`。
+- 用户取消更新后，同一版本不再自动提示；托盘菜单仍可手动检查。
+- 默认更新源为 GitHub 最新 Release：
+
+```
+https://github.com/amygoTV/AutoDeleteImage/releases/latest/download/version.txt
+https://github.com/amygoTV/AutoDeleteImage/releases/latest/download/AutoDeleteImage-win.zip
+```
+
+如果使用环境无法访问 GitHub，可以在 `config.ini` 中指定内部共享目录或内部 HTTP 服务器：
+
+```ini
+[Update]
+BaseUrl=D:\Tools\AutoDeleteImage\Update\
+```
+
+> v1.3.1 及更早版本没有更新器，需要手动安装一次 v1.4.0，之后才能自动更新。
+
+注意事项：
+
+- 程序需要放在当前用户有写权限的目录（例如 `D:\Tools\AutoDeleteImage`），不要放在 `C:\Program Files`，否则更新脚本无法替换 exe。
+- 使用 GitHub 更新源时，客户端电脑必须能访问 `github.com`。
+- 更新包只替换程序文件，不会覆盖 `config.ini` 和 `Log`。
+
+## 发布新版本
+
+仓库已配置 GitHub Actions（`.github/workflows/release.yml`）。发布步骤：
+
+1. 修改 `MainForm.cs` 中的 `APP_VERSION` 和 `开发日志.md`。
+2. 提交并推送代码。
+3. 打标签并推送：
+
+```bash
+git tag v1.4.0
+git push origin main --tags
+```
+
+4. GitHub Actions 会自动构建、生成 `AutoDeleteImage-win.zip` 和 `version.txt`，并创建 Release。
+
 ## 技术栈
 
 | 项 | 说明 |
@@ -84,13 +128,15 @@ AutoDeleteImage/
 ├── IdleDetector.cs             # 电脑空闲检测
 ├── AutoStartHelper.cs          # 开机自启
 ├── LogHelper.cs                # 按天文件日志
+├── UpdateChecker.cs            # 检查更新、下载并启动更新脚本
 ├── Delete_image.ico            # 程序图标
+├── .github/workflows/release.yml # GitHub Actions 自动发布
 ├── 开发日志.md                 # 版本变更记录
 └── README.md                   # 本文件
 ```
 
 ## 版本
 
-当前版本：**v1.3.1**
+当前版本：**v1.4.0**
 
 详细变更见 [开发日志.md](开发日志.md)。

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace AutoDeleteImage
@@ -14,6 +15,7 @@ namespace AutoDeleteImage
         private ContextMenuStrip _trayMenu;
         private ToolStripMenuItem _miExit;
         private ToolStripMenuItem _miAutoStart;
+        private ToolStripMenuItem _miCheckUpdate;
 
         private DataGridView _dgvTasks;
         private Button _btnAdd;
@@ -30,9 +32,11 @@ namespace AutoDeleteImage
         private string _editingId = null;
         private bool _exiting = false;
         private bool _lastRunFailed = false;
+        private bool _updateCheckRunning = false;
+        private bool _updateDownloading = false;
 
         // 版本号（每次更新请同步修改 开发日志.md）
-        private const string APP_VERSION = "1.3.1";
+        private const string APP_VERSION = "1.4.0";
         private const int MAX_TASKS = 20;
 
         public MainForm()
@@ -41,6 +45,8 @@ namespace AutoDeleteImage
 
             LoadAppIcon();
             InitTrayIcon();
+
+            UpdateChecker.CleanupOldUpdates();
 
             LoadTasks();
             RefreshGrid();
@@ -205,12 +211,15 @@ namespace AutoDeleteImage
             };
 
             _trayMenu = new ContextMenuStrip();
+            _miCheckUpdate = new ToolStripMenuItem("检查更新");
             _miAutoStart = new ToolStripMenuItem("开机自启");
             _miExit = new ToolStripMenuItem("退出");
 
+            _miCheckUpdate.Click += MiCheckUpdate_Click;
             _miAutoStart.Click += MiAutoStart_Click;
             _miExit.Click += MiExit_Click;
 
+            _trayMenu.Items.Add(_miCheckUpdate);
             _trayMenu.Items.Add(_miAutoStart);
             _trayMenu.Items.Add(new ToolStripSeparator());
             _trayMenu.Items.Add(_miExit);
@@ -274,6 +283,187 @@ namespace AutoDeleteImage
 
         private void MiExit_Click(object sender, EventArgs e)
         {
+            ExitApplication("程序已退出");
+        }
+
+        // ==================== 自动更新 ====================
+
+        private void MiCheckUpdate_Click(object sender, EventArgs e)
+        {
+            StartUpdateCheck(true);
+        }
+
+        private void StartUpdateCheck(bool manual)
+        {
+            if (_updateCheckRunning || _exiting) return;
+
+            if (!manual)
+            {
+                string lastCheck = IniHelper.GetValue("Update", "LastCheck", "");
+                if (string.Equals(lastCheck, DateTime.Now.ToString("yyyy-MM-dd"), StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            _updateCheckRunning = true;
+            if (manual) AppendLog("正在检查更新...");
+
+            string baseUrl = UpdateChecker.GetBaseUrl();
+
+            Task.Run(() =>
+            {
+                UpdateCheckResult result = UpdateChecker.Check(APP_VERSION, baseUrl);
+                if (IsDisposed) return;
+
+                try
+                {
+                    BeginInvoke(new Action<UpdateCheckResult, bool>(OnUpdateChecked), result, manual);
+                }
+                catch (InvalidOperationException) { }
+            });
+        }
+
+        private void OnUpdateChecked(UpdateCheckResult result, bool manual)
+        {
+            _updateCheckRunning = false;
+            if (IsDisposed) return;
+
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                AppendLog("检查更新失败：" + result.Error);
+                if (manual)
+                {
+                    MessageBox.Show(this, "检查更新失败：\n" + result.Error, "检查更新",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
+
+            // 检查成功才记录日期，网络失败下次启动会重试
+            IniHelper.SetValue("Update", "LastCheck", DateTime.Now.ToString("yyyy-MM-dd"));
+
+            if (!result.HasUpdate)
+            {
+                if (manual)
+                {
+                    AppendLog("已是最新版本 v" + APP_VERSION);
+                    MessageBox.Show(this, "当前已是最新版本 v" + APP_VERSION + "。", "检查更新",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return;
+            }
+
+            if (!manual)
+            {
+                string skipped = IniHelper.GetValue("Update", "SkippedVersion", "");
+                if (string.Equals(skipped, result.Update.VersionText, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            ShowUpdatePrompt(result.Update);
+        }
+
+        private void ShowUpdatePrompt(UpdateInfo info)
+        {
+            if (!Visible || WindowState == FormWindowState.Minimized)
+            {
+                Show();
+                WindowState = FormWindowState.Normal;
+                Activate();
+                BringToFront();
+            }
+
+            AppendLog("发现新版本 v" + info.VersionText);
+
+            string busyTip = (_cleanService != null && _cleanService.IsRunning)
+                ? "\n\n注意：当前正在清理文件，更新会中断本次清理。"
+                : "";
+
+            string message = "发现新版本 v" + info.VersionText + "，是否立即更新？\n\n"
+                + "更新会重启程序，任务配置和运行日志会保留。" + busyTip;
+
+            DialogResult choice = MessageBox.Show(this, message, "发现新版本",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+
+            if (choice != DialogResult.Yes)
+            {
+                IniHelper.SetValue("Update", "SkippedVersion", info.VersionText);
+                AppendLog("已跳过版本 v" + info.VersionText + "，可在托盘菜单手动检查更新");
+                return;
+            }
+
+            DownloadUpdate(info);
+        }
+
+        private void DownloadUpdate(UpdateInfo info)
+        {
+            if (_updateDownloading) return;
+
+            _updateDownloading = true;
+            AppendLog("开始下载更新 v" + info.VersionText + "...");
+
+            Task.Run(() =>
+            {
+                PreparedUpdate prepared;
+                string error;
+                bool ok = UpdateChecker.DownloadAndPrepare(info, out prepared, out error);
+                if (IsDisposed) return;
+
+                try
+                {
+                    BeginInvoke(new Action<bool, PreparedUpdate, string, UpdateInfo>(OnUpdateDownloaded),
+                        ok, prepared, error, info);
+                }
+                catch (InvalidOperationException) { }
+            });
+        }
+
+        private void OnUpdateDownloaded(bool ok, PreparedUpdate prepared, string error, UpdateInfo info)
+        {
+            _updateDownloading = false;
+            if (IsDisposed) return;
+
+            if (!ok)
+            {
+                AppendLog("下载更新失败：" + error);
+                MessageBox.Show(this, "下载更新失败：\n" + error, "更新失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            AppendLog("更新包已下载完成");
+
+            DialogResult choice = MessageBox.Show(this,
+                "更新已下载完成，点击“确定”后程序将重启并安装新版本。\n\n任务配置和运行日志会保留。",
+                "更新准备就绪", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+
+            if (choice != DialogResult.OK)
+            {
+                UpdateChecker.Cleanup(prepared);
+                AppendLog("已取消安装更新");
+                return;
+            }
+
+            string startError;
+            if (!UpdateChecker.StartUpdater(prepared, out startError))
+            {
+                UpdateChecker.Cleanup(prepared);
+                AppendLog("启动更新程序失败：" + startError);
+                MessageBox.Show(this, "启动更新程序失败：\n" + startError, "更新失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            AppendLog("程序将重启以完成更新 v" + info.VersionText);
+            ExitApplication("程序已退出，等待安装更新");
+        }
+
+        private void ExitApplication(string exitLog)
+        {
+            if (_exiting) return;
             _exiting = true;
 
             try { SaveTasks(); } catch { }
@@ -286,7 +476,7 @@ namespace AutoDeleteImage
 
             try { _cleanService?.Dispose(); } catch { }
 
-            AppendLog("程序已退出");
+            AppendLog(exitLog);
 
             // 确保详细日志缓冲全部落盘
             LogHelper.Close();
@@ -339,6 +529,7 @@ namespace AutoDeleteImage
         private void MainForm_Shown(object sender, EventArgs e)
         {
             FlushPendingLogs();
+            StartUpdateCheck(false);
         }
 
         private void AppendLog(string msg)
