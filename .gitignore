@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+publish/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Runtime config and logs
+config.ini
+Log/
+
+# OS / IDE
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
