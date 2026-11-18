@@ -36,7 +36,7 @@ namespace AutoDeleteImage
         private bool _updateDownloading = false;
 
         // 版本号（每次更新请同步修改 开发日志.md）
-        private const string APP_VERSION = "1.4.0";
+        private const string APP_VERSION = "1.4.1";
         private const int MAX_TASKS = 20;
 
         public MainForm()
@@ -304,6 +304,9 @@ namespace AutoDeleteImage
                 {
                     return;
                 }
+
+                // 先记录日期，避免网络失败时定时器反复重试
+                IniHelper.SetValue("Update", "LastCheck", DateTime.Now.ToString("yyyy-MM-dd"));
             }
 
             _updateCheckRunning = true;
@@ -816,6 +819,9 @@ namespace AutoDeleteImage
         {
             if (_cleanService == null) return;
             _cleanService.Start(_tasks);
+
+            // 程序长期在托盘运行时，也能每天检查一次更新
+            StartUpdateCheck(false);
         }
 
         // ==================== 配置文件 ====================
