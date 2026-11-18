@@ -79,6 +79,7 @@ BaseUrl=D:\Tools\AutoDeleteImage\Update\
 - 程序需要放在当前用户有写权限的目录（例如 `D:\Tools\AutoDeleteImage`），不要放在 `C:\Program Files`，否则更新脚本无法替换 exe。
 - 使用 GitHub 更新源时，客户端电脑必须能访问 `github.com`。
 - 更新包只替换程序文件，不会覆盖 `config.ini` 和 `Log`。
+- 更新脚本会自动备份旧版本；如果新版本被杀毒软件拦截或无法启动，会自动回滚到旧版本。部分公司电脑的 Microsoft Defender ASR 规则可能会拦截未签名的新程序，此时需要联系 IT 添加信任后重试。
 
 ## 发布新版本
 
@@ -137,6 +138,6 @@ AutoDeleteImage/
 
 ## 版本
 
-当前版本：**v1.4.1**
+当前版本：**v1.4.2**
 
 详细变更见 [开发日志.md](开发日志.md)。

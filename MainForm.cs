@@ -36,7 +36,7 @@ namespace AutoDeleteImage
         private bool _updateDownloading = false;
 
         // 版本号（每次更新请同步修改 开发日志.md）
-        private const string APP_VERSION = "1.4.1";
+        private const string APP_VERSION = "1.4.2";
         private const int MAX_TASKS = 20;
 
         public MainForm()
